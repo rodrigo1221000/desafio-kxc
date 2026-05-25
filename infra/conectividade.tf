@@ -1,13 +1,9 @@
 ###################################################################################################################
-# Rede — VPC, subnets, route tables. Sem NAT (Free Tier).
-#
-# Topologia:
-#   - Subnets públicas  → IGW (ECS Fargate com IP público, pull ECR)
-#   - Subnets privadas  → sem rota 0.0.0.0/0 (RDS isolado; tráfego ECS→RDS é intra-VPC)
+# Rede 
 ###################################################################################################################
 
 locals {
-  # O módulo de subnet usa each.key do mapa como availability_zone (ex.: "us-east-1a")
+ 
   availability_zones_public  = { for az, _ in var.public_subnet_names : az => az }
   availability_zones_private = { for az, _ in var.private_subnet_names : az => az }
 }
@@ -60,7 +56,7 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Route table privada: apenas rotas locais da VPC (sem NAT / sem IGW)
+# Route table privada 
 resource "aws_route_table" "private" {
   vpc_id = module.vpc_app.vpc_id
   tags   = merge(local.common_tags, { Name = "${var.project_name}-private-rt" })

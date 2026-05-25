@@ -1,5 +1,5 @@
 ###################################################################################################################
-# ECS Fargate — simple-api (subnets públicas + IP público, sem NAT/ALB)
+# ECS Fargate
 ###################################################################################################################
 
 module "ecs_cluster" {
@@ -57,20 +57,26 @@ module "ecs_task_definition" {
 }
 
 module "ecs_service" {
-  source                            = "../modulos/Aplicacao/prod/ecs/service"
-  service_name                      = var.ecs_service_name
-  cluster_id                        = module.ecs_cluster.cluster_id
-  task_definition_arn               = module.ecs_task_definition.task_definition_arn
-  desired_count                     = 1
-  launch_type                       = "FARGATE"
-  subnet_ids                        = module.subnet_public.public_subnet_id
-  security_group_ids                = [module.security_group_api.security_group_id]
-  assign_public_ip                  = true
-  load_balancer                     = null
+  source              = "../modulos/Aplicacao/prod/ecs/service"
+  service_name        = var.ecs_service_name
+  cluster_id          = module.ecs_cluster.cluster_id
+  task_definition_arn = module.ecs_task_definition.task_definition_arn
+  desired_count       = 1
+  launch_type         = "FARGATE"
+  subnet_ids          = module.subnet_public.public_subnet_id
+  security_group_ids  = [module.security_group_api.security_group_id]
+  assign_public_ip    = true
+  load_balancer = {
+    target_group_arn = module.target_group_api.target_group_arn
+    container_name   = "simple-api"
+    container_port   = var.api_port
+  }
   service_registry                  = null
   deployment_maximum_percent        = 200
   deployment_minimum_percent        = 100
-  health_check_grace_period_seconds = 0
+  health_check_grace_period_seconds = 60
   enable_execute_command            = false
   tags                              = merge(local.common_tags, { Name = var.ecs_service_name })
+
+  depends_on = [aws_lb_listener.api_http]
 }

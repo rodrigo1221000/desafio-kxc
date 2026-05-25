@@ -111,7 +111,7 @@ variable "ecs_task_memory" {
 }
 
 variable "allowed_api_cidr" {
-  description = "CIDR permitido no SG da API (porta da aplicação)."
+  description = "CIDR permitido no SG do ALB (porta 80)."
   type        = string
 }
 

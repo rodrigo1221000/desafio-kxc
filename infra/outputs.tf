@@ -48,15 +48,14 @@ output "api_security_group_id" {
   value       = module.security_group_api.security_group_id
 }
 
-output "deploy_notes" {
-  description = "Passos após o primeiro apply."
-  value       = <<-EOT
-    CI/CD: push em main em simple-api-main/ dispara .github/workflows/api-deploy.yml
-    Manual:
-    1. aws ecr get-login-password --region ${var.aws_region} | docker login --username AWS --password-stdin ${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com
-    2. docker build -t ${aws_ecr_repository.api.repository_url}:latest ../simple-api-main
-    3. docker push ${aws_ecr_repository.api.repository_url}:latest
-    4. Atualize o serviço ECS (workflow api-deploy ou console)
-    5. Teste GET / e GET /connect no IP público da task (ECS > task > ENI)
-  EOT
+output "alb_dns_name" {
+  description = "DNS do ALB (use http://<dns>/ e http://<dns>/connect)."
+  value       = module.alb.lb_dns_name
 }
+
+output "alb_target_group_arn" {
+  description = "ARN do target group da API."
+  value       = module.target_group_api.target_group_arn
+}
+
+ 

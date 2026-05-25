@@ -2,7 +2,7 @@ aws_region   = "us-east-1"
 project_name = "kxc-challenge-api"
 environment  = "challenge"
 
-# Rede (sem NAT — chaves dos mapas = AZ em us-east-1; CIDRs não podem sobrepor)
+# Rede
 vpc_cidr_block = "10.0.0.0/16"
 
 subnet_cidr_blocks_public = {
@@ -23,7 +23,7 @@ private_subnet_names = {
   "us-east-1b" = "kxc-private-1b"
 }
 
-# RDS PostgreSQL (Free Tier)
+# RDS PostgreSQL 
 db_identifier     = "kxc-challenge-postgres"
 db_name           = "challenge_db"
 db_username       = "challenge_admin"
@@ -31,11 +31,11 @@ db_password       = "ChangeMeChallenge"
 db_instance_class = "db.t4g.micro"
 db_engine_version = "16.4"
 
-# ECS Fargate — após o apply, faça push da imagem e atualize container_image
+# ECS Fargate  
 ecs_cluster_name = "kxc-api-cluster"
 ecs_service_name = "kxc-api-service"
 ecs_task_family  = "kxc-simple-api"
-container_image  = "nginx:latest"
+container_image  = "kxc-simple-api:latest"
 api_port         = 3000
 ecs_task_cpu     = "256"
 ecs_task_memory  = "512"
