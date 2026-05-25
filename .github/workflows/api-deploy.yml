@@ -1,0 +1,142 @@
+name: Deploy API (ECR + ECS)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "simple-api-main/**"
+      - ".github/workflows/api-deploy.yml"
+  workflow_run:
+    workflows: ["Infraestrutura (Terraform)"]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  # Fallback quando o state do Terraform não estiver no runner (ex.: backend local)
+  ECS_CLUSTER_DEFAULT: kxc-api-cluster
+  ECS_SERVICE_DEFAULT: kxc-api-service
+  ECR_REPOSITORY_DEFAULT: kxc-simple-api
+  ECS_CONTAINER_NAME: simple-api
+
+jobs:
+  deploy-api:
+    name: Build, Push ECR e Deploy ECS
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform (ler outputs da infra)
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Carregar variáveis da infraestrutura
+        id: infra
+        working-directory: ./infra
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          terraform init -input=false
+
+          ECS_CLUSTER="$(terraform output -raw ecs_cluster_name)"
+          ECS_SERVICE="$(terraform output -raw ecs_service_name)"
+          ECR_REPOSITORY="$(terraform output -raw ecr_repository_name)"
+
+          echo "ecs_cluster=$ECS_CLUSTER" >> "$GITHUB_OUTPUT"
+          echo "ecs_service=$ECS_SERVICE" >> "$GITHUB_OUTPUT"
+          echo "ecr_repository=$ECR_REPOSITORY" >> "$GITHUB_OUTPUT"
+
+      - name: Resolver nomes ECS/ECR (fallback)
+        id: target
+        run: |
+          set -euo pipefail
+
+          ECS_CLUSTER="${{ steps.infra.outputs.ecs_cluster }}"
+          ECS_SERVICE="${{ steps.infra.outputs.ecs_service }}"
+          ECR_REPO="${{ steps.infra.outputs.ecr_repository }}"
+
+          if [ -z "$ECS_CLUSTER" ]; then
+            ECS_CLUSTER="${ECS_CLUSTER_DEFAULT}"
+          fi
+          if [ -z "$ECS_SERVICE" ]; then
+            ECS_SERVICE="${ECS_SERVICE_DEFAULT}"
+          fi
+          if [ -z "$ECR_REPO" ]; then
+            ECR_REPO="${{ secrets.ECR_REPOSITORY }}"
+          fi
+          if [ -z "$ECR_REPO" ]; then
+            ECR_REPO="${ECR_REPOSITORY_DEFAULT}"
+          fi
+
+          ECR_REPO="$(echo "$ECR_REPO" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+          ECR_REPO="${ECR_REPO##*/}"
+
+          echo "ecs_cluster=$ECS_CLUSTER" >> "$GITHUB_OUTPUT"
+          echo "ecs_service=$ECS_SERVICE" >> "$GITHUB_OUTPUT"
+          echo "ecr_repository=$ECR_REPO" >> "$GITHUB_OUTPUT"
+
+      - name: Login no Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build e push da imagem (simple-api)
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ steps.target.outputs.ecr_repository }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          LATEST_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+
+          echo "Imagem: $IMAGE_URI"
+          docker build -t "$IMAGE_URI" ./simple-api-main
+          docker push "$IMAGE_URI"
+          docker tag "$IMAGE_URI" "$LATEST_URI"
+          docker push "$LATEST_URI"
+
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Baixar task definition atual
+        run: |
+          set -euo pipefail
+          TASK_DEF_ARN="$(aws ecs describe-services \
+            --cluster "${{ steps.target.outputs.ecs_cluster }}" \
+            --services "${{ steps.target.outputs.ecs_service }}" \
+            --query "services[0].taskDefinition" \
+            --output text)"
+
+          if [ "$TASK_DEF_ARN" = "None" ] || [ -z "$TASK_DEF_ARN" ]; then
+            echo "Serviço ECS não encontrado. Rode o terraform apply da infra antes."
+            exit 1
+          fi
+
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF_ARN" \
+            --query "taskDefinition" > task-definition.json
+
+      - name: Renderizar task definition (nova imagem)
+        id: render-task
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.ECS_CONTAINER_NAME }}
+          image: ${{ env.image_uri }}
+
+      - name: Deploy no ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task.outputs.task-definition }}
+          service: ${{ steps.target.outputs.ecs_service }}
+          cluster: ${{ steps.target.outputs.ecs_cluster }}
+          wait-for-service-stability: true
